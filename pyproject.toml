@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evidencecoder"
+version = "0.1.0"
+description = "A small, evidence-backed local coding agent built without an agent framework."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+]
+
+[project.scripts]
+evidencecoder = "evidencecoder.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["evidencecoder*"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

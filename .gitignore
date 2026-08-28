@@ -19,6 +19,7 @@ build/
 
 # EvidenceCoder runtime data
 .evidencecoder/
+.audit-cache/
 
 # IDE and operating-system files
 .idea/
