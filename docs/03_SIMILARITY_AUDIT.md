@@ -194,7 +194,7 @@ Codex、Cline、Goose 和 OpenCode 不能只依赖文本工具。人工表格逐
 
 ## 7. 正式报告模板
 
-实现后生成 `docs/04_FINAL_SIMILARITY_REPORT.md`，至少包含：
+实现后生成 `docs/05_FINAL_SIMILARITY_REPORT.md`，至少包含：
 
 - 自研仓库 commit SHA。
 - 7 个参考仓库 commit SHA。
