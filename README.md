@@ -65,7 +65,9 @@ evidencecoder --workspace C:\path\to\project
 ```
 
 直接输入任务即可连续工作；内置命令为 `/help`、`/status`、`/history`、`/new`、
-`/resume <id|latest>`、`/retry`、`/export [path]`、`/paste` 和 `/exit`。`/retry`
+`/resume [id|latest]`、`/retry`、`/export [path]`、`/paste` 和 `/exit`。不带参数的
+`/resume` 会列出当前工作区的最近对话，输入序号即可恢复；`/resume latest` 和指定 ID
+的方式仍然可用。`/retry`
 使用新的 RunBook 重试上一条指令，不复用旧凭证；`/export` 输出 Markdown 对话报告。
 对话默认原子保存到
 `.evidencecoder/dialogues/`，以后可恢复：

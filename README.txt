@@ -11,4 +11,4 @@ EvidenceCoder 是 Python 3.11+ 本地 Coding Agent，通过 OpenAI-compatible Ch
 一次性运行：evidencecoder --workspace <项目目录> "任务描述"
 测试：python -m pytest
 
-CLI 提供彩色状态、写入前 diff、调用/token/耗时统计，以及 /history、/resume、/retry、/export 等命令。固定工具支持目录、单个或批量读取、搜索、精确写入、命令执行和只读 Git 状态/diff。默认写入和命令需确认；--yes 不能绕过 git push、git reset --hard、系统关机、磁盘格式化和工作区整体递归删除等硬拒绝规则。本项目不是操作系统沙箱，不应以高权限处理不可信项目。
+CLI 提供彩色状态、写入前 diff、调用/token/耗时统计，以及 /history、/resume、/retry、/export 等命令；/resume 会列出对话供选择，/resume latest 仍可直接恢复最近对话。固定工具支持目录、单个或批量读取、搜索、精确写入、命令执行和只读 Git 状态/diff。默认写入和命令需确认；--yes 不能绕过 git push、git reset --hard、系统关机、磁盘格式化和工作区整体递归删除等硬拒绝规则。本项目不是操作系统沙箱，不应以高权限处理不可信项目。
