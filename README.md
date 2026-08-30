@@ -2,7 +2,8 @@
 
 EvidenceCoder 是一个不依赖 Agent 框架的本地 Coding Agent。它通过
 OpenAI-compatible Chat Completions API 使用模型原生 tool calling，自行实现上下文、
-工具分派、审批、执行循环、终止条件和错误处理。项目只依赖 `httpx`，不使用
+工具分派、审批、执行循环、终止条件和错误处理。运行时只依赖 HTTP 客户端 `httpx`
+和终端显示库 `Rich`，不使用
 LangChain、LlamaIndex、OpenAI Agents SDK、Claude Agent SDK、AutoGen 或 CrewAI。
 
 它的核心约束是“结论必须有凭证”：所有本地动作形成单调递增的
@@ -12,10 +13,13 @@ LangChain、LlamaIndex、OpenAI Agents SDK、Claude Agent SDK、AutoGen 或 Crew
 
 ## 能力边界
 
-- 在指定工作区内列目录、分段读取、搜索、精确替换和写入 UTF-8 文本。
+- 在指定工作区内列目录、单文件或批量分段读取、搜索、精确替换和写入 UTF-8 文本。
+- 通过固定的只读工具查看仓库状态和有界 Git diff，不自动提交、回滚或推送。
 - 在固定工作目录执行独立的本地命令，记录退出码、超时和截断后的输出。
 - 对写入和命令请求终端确认；`--yes` 只能跳过普通确认，不能绕过硬拒绝规则。
 - 提供连续交互式 CLI；每条指令独立验收，并可保存、恢复同一工作区的已验证对话事实。
+- 使用彩色面板、模型等待状态和紧凑工具结果；写入审批前显示有界 unified diff。
+- 汇总模型调用、工具调用、耗时和网关返回的 token 用量。
 - 根据 token 软预算压缩早期上下文，同时保留原始 RunBook 和操作事实。
 - 检测最大轮数、墙钟时间、连续工具错误、重复动作和用户中断。
 
@@ -61,7 +65,9 @@ evidencecoder --workspace C:\path\to\project
 ```
 
 直接输入任务即可连续工作；内置命令为 `/help`、`/status`、`/history`、`/new`、
-`/resume <id|latest>`、`/paste` 和 `/exit`。对话默认原子保存到
+`/resume <id|latest>`、`/retry`、`/export [path]`、`/paste` 和 `/exit`。`/retry`
+使用新的 RunBook 重试上一条指令，不复用旧凭证；`/export` 输出 Markdown 对话报告。
+对话默认原子保存到
 `.evidencecoder/dialogues/`，以后可恢复：
 
 ```powershell
@@ -109,12 +115,17 @@ COMPOSE → ASK → CHECK → AUTHORIZE → ACT → ASSESS
 - `runbook.py`：只追加的对话与本地操作记录。
 - `dialogue.py`：跨任务的已验证事实、工作区绑定和原子持久化。
 - `interactive.py`：行式 REPL、斜杠命令和进程内审批状态。
+- `display.py`：Rich 显示、结构化运行事件、结果表格和审批 diff；不拥有 Agent 状态。
 - `context_window.py`：从 RunBook 投影当前上下文并压缩早期历史。
 - `platform_facts.py`：向模型提供非敏感的本机系统、Shell 和 Python 命令事实。
 - `toolbox.py`：固定 schema、参数校验和分派。
 - `guard.py`：平台侧允许、询问或拒绝决策。
 - `completion.py`：把完成声明与真实操作凭证交叉核验。
-- `tool_impl/`：工作区文件操作和独立子进程执行。
+- `tool_impl/`：工作区文件、独立子进程和只读 Git 操作。
+
+固定工具共 10 个：`inspect_tree`、`read_segment`、`read_many`、`find_matches`、
+`replace_text`、`write_text`、`run_local`、`git_status`、`git_diff`、`submit_result`。
+Git 工具要求 `--workspace` 指向仓库根目录；它们不提供 Git 写操作。
 
 工具调用失败会作为结构化结果反馈给模型，不会让主循环直接崩溃。非零命令退出码是
 有效观察，但不能作为“检查通过”的凭证。
@@ -128,7 +139,8 @@ python -m pytest
 
 测试包含本地 `FakeGateway`，无需 API Key 即可验证完整的写入—命令—凭证提交循环。
 它还覆盖路径穿越、符号链接越界、精确替换、命令超时、API 重试、危险命令、schema、
-`.env` 配置与优先级、上下文压缩、对话恢复、Windows 输出解码、计时边界和主要终止条件。
+`.env` 配置与优先级、上下文压缩、对话恢复、Rich 输出、diff 预览、批量读取、只读 Git、
+使用统计、报告导出、Windows 输出解码、计时边界和主要终止条件。
 
 ## 独立性说明
 
