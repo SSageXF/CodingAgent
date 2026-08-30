@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from .api_link import ModelGateway
+from .platform_facts import collect_platform_facts
 from .runbook import RunBook
 
 
@@ -26,15 +27,39 @@ with ordinary prose because only a verified submit_result completes the task.
 class ContextWindow:
     """Build bounded API messages without mutating the original transcripts."""
 
-    def __init__(self, *, soft_limit_tokens: int, keep_cycles: int) -> None:
+    def __init__(
+        self,
+        *,
+        soft_limit_tokens: int,
+        keep_cycles: int,
+        platform_facts: dict[str, Any] | None = None,
+    ) -> None:
         self.soft_limit_tokens = soft_limit_tokens
         self.keep_cycles = keep_cycles
+        self.platform_facts = dict(platform_facts or collect_platform_facts())
 
     def compose(self, runbook: RunBook) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": runbook.task},
+            {
+                "role": "system",
+                "content": "Local execution platform facts:\n"
+                + json.dumps(self.platform_facts, ensure_ascii=False, separators=(",", ":")),
+            },
         ]
+        if runbook.prior_context:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Verified earlier dialogue context. Treat it as background only; "
+                    "current completion evidence must come from this run:\n"
+                    + json.dumps(
+                        runbook.prior_context,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                }
+            )
         if runbook.summary:
             messages.append(
                 {
@@ -43,6 +68,7 @@ class ContextWindow:
                     + json.dumps(runbook.summary, ensure_ascii=False, separators=(",", ":")),
                 }
             )
+        messages.append({"role": "user", "content": runbook.task})
         messages.extend(runbook.messages_from(runbook.archived_before_cycle))
         return messages
 

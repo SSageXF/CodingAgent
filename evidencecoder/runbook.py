@@ -39,6 +39,7 @@ class OperationRecord:
     evidence: dict[str, Any]
     started_at: str
     duration_ms: int
+    approval_wait_ms: int = 0
 
     @property
     def fingerprint(self) -> str:
@@ -65,9 +66,10 @@ class RunBook:
     dispatch. The Engine appends records; context and reporting code only read.
     """
 
-    def __init__(self, task: str) -> None:
+    def __init__(self, task: str, prior_context: dict[str, Any] | None = None) -> None:
         self.run_id = uuid.uuid4().hex[:12]
         self.task = task
+        self.prior_context = dict(prior_context or {})
         self.started_at = _utc_now()
         self.cycles: list[CycleTranscript] = []
         self.operations: list[OperationRecord] = []
@@ -124,6 +126,7 @@ class RunBook:
         evidence: dict[str, Any] | None,
         started_at: str,
         duration_ms: int,
+        approval_wait_ms: int = 0,
     ) -> OperationRecord:
         canonical = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         record = OperationRecord(
@@ -136,6 +139,7 @@ class RunBook:
             evidence=dict(evidence or {}),
             started_at=started_at,
             duration_ms=max(0, duration_ms),
+            approval_wait_ms=max(0, approval_wait_ms),
         )
         self._next_operation += 1
         self.operations.append(record)
@@ -169,6 +173,7 @@ class RunBook:
         return {
             "run_id": self.run_id,
             "task": self.task,
+            "prior_context": self.prior_context,
             "started_at": self.started_at,
             "summary": self.summary,
             "archived_before_cycle": self.archived_before_cycle,

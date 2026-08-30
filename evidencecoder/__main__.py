@@ -8,8 +8,10 @@ import sys
 
 from . import __version__
 from .api_link import APILink
-from .display import confirm_tool, print_event
+from .dialogue import DialogueError
+from .display import confirm_tool, print_agent_result, print_event
 from .engine import Engine, RunStatus
+from .interactive import InteractiveShell
 from .settings import Settings
 
 
@@ -29,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yes-writes", action="store_true", help="approve workspace writes")
     parser.add_argument("--yes-commands", action="store_true", help="approve local commands")
     parser.add_argument("--no-save-log", action="store_true", help="do not save the local run log")
+    parser.add_argument("--resume", help="resume a saved interactive dialogue id or 'latest'")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -36,13 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     task = args.task
-    if not task:
-        try:
-            task = input("Task: ").strip()
-        except EOFError:
-            task = ""
-    if not task:
-        print("error: a task is required", file=sys.stderr)
+    if task and args.resume:
+        print("error: --resume is only available in interactive mode", file=sys.stderr)
+        return 2
+    if not task and not sys.stdin.isatty():
+        print("error: interactive mode requires a terminal; provide a task", file=sys.stderr)
         return 2
 
     env_overrides = {
@@ -78,22 +79,20 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=settings.request_timeout_seconds,
         max_retries=settings.api_max_retries,
     ) as gateway:
-        result = Engine(
-            settings,
-            gateway,
-            approval=confirm_tool,
-            observer=print_event,
-        ).run(task)
-
-    print(f"\nStatus: {result.status.value}")
-    print(result.summary)
-    if result.completion:
-        changed = result.completion.get("changed_files") or []
-        if changed:
-            print("Changed files: " + ", ".join(changed))
-    if result.log_path:
-        print(f"Run log: {result.log_path}")
-    return 0 if result.status is RunStatus.COMPLETED else 1
+        if task:
+            result = Engine(
+                settings,
+                gateway,
+                approval=confirm_tool,
+                observer=print_event,
+            ).run(task)
+            print_agent_result(result)
+            return 0 if result.status is RunStatus.COMPLETED else 1
+        try:
+            return InteractiveShell(settings, gateway, resume=args.resume).run()
+        except (ValueError, DialogueError) as exc:
+            print(f"interactive error: {exc}", file=sys.stderr)
+            return 2
 
 
 if __name__ == "__main__":

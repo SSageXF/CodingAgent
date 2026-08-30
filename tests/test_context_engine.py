@@ -77,6 +77,38 @@ def test_full_engine_loop_requires_evidence_and_completes(tmp_path):
     ]
 
 
+def test_prior_context_and_platform_facts_are_projected(tmp_path):
+    gateway = FakeGateway([ModelReply("done"), ModelReply("done"), ModelReply("done")])
+    Engine(settings_for(tmp_path), gateway).run(
+        "continue", prior_context={"verified_entries": [{"summary": "created x.py"}]}
+    )
+    first_messages = gateway.requests[0][0]
+    assert "Local execution platform facts" in first_messages[1]["content"]
+    assert "recommended_python_command" in first_messages[1]["content"]
+    assert "created x.py" in first_messages[2]["content"]
+
+
+def test_approval_wait_is_not_counted_as_execution_time(tmp_path):
+    gateway = FakeGateway(
+        [call("c1", "write_text", {"path": "x.txt", "content": "x"})]
+    )
+
+    def approve(*_):
+        import time
+
+        time.sleep(0.05)
+        return True
+
+    result = Engine(
+        settings_for(tmp_path, auto_approve_writes=False, max_cycles=1),
+        gateway,
+        approval=approve,
+    ).run("write x")
+    record = result.runbook.operations[0]
+    assert record.approval_wait_ms >= 40
+    assert record.duration_ms < record.approval_wait_ms
+
+
 def test_unapproved_write_is_recorded_as_denied(tmp_path):
     gateway = FakeGateway(
         [call("c1", "write_text", {"path": "x", "content": "no"})]
@@ -141,5 +173,5 @@ def test_context_compaction_preserves_operation_facts(tmp_path):
     assert book.summary is not None
     assert len(book.summary["verified_operations"]) == 3
     messages = window.compose(book)
-    assert "Earlier verified run summary" in messages[2]["content"]
-    assert len(messages) == 4
+    assert any("Earlier verified run summary" in message["content"] for message in messages)
+    assert len(messages) == 5

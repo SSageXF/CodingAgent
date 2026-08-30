@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import locale
 from pathlib import Path
 import signal
 import subprocess
@@ -36,9 +37,6 @@ class LocalCommands:
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
-            "text": True,
-            "encoding": "utf-8",
-            "errors": "replace",
         }
         if os.name == "nt":
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -47,13 +45,14 @@ class LocalCommands:
         process = subprocess.Popen(**popen_kwargs)
         timed_out = False
         try:
-            output, _ = process.communicate(timeout=timeout)
+            output_bytes, _ = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             _terminate_process_tree(process)
-            output, _ = process.communicate()
+            output_bytes, _ = process.communicate()
         duration_ms = int((time.monotonic() - started) * 1_000)
-        rendered, truncated = _truncate_middle(output or "", self.MAX_OUTPUT_CHARS)
+        output, output_encoding, decode_replacements = _decode_output(output_bytes or b"")
+        rendered, truncated = _truncate_middle(output, self.MAX_OUTPUT_CHARS)
         if timed_out:
             return ToolOutcome(
                 OperationStatus.TIMEOUT,
@@ -64,6 +63,8 @@ class LocalCommands:
                     "exit_code": process.returncode,
                     "duration_ms": duration_ms,
                     "output_truncated": truncated,
+                    "output_encoding": output_encoding,
+                    "decode_replacements": decode_replacements,
                 },
             )
         prefix = f"exit code: {process.returncode}"
@@ -76,11 +77,13 @@ class LocalCommands:
                 "exit_code": process.returncode,
                 "duration_ms": duration_ms,
                 "output_truncated": truncated,
+                "output_encoding": output_encoding,
+                "decode_replacements": decode_replacements,
             },
         )
 
 
-def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
     if os.name == "nt":
@@ -105,3 +108,37 @@ def _truncate_middle(text: str, limit: int) -> tuple[str, bool]:
     head = remaining // 2
     tail = remaining - head
     return (text[:head] + marker + text[-tail:]).rstrip(), True
+
+
+def _decode_output(data: bytes, encodings: list[str] | None = None) -> tuple[str, str, bool]:
+    candidates = encodings or _candidate_encodings()
+    seen: set[str] = set()
+    for encoding in candidates:
+        normalized = encoding.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        try:
+            return data.decode(encoding), encoding, False
+        except (UnicodeDecodeError, LookupError):
+            continue
+    fallback = candidates[-1] if candidates else "utf-8"
+    return data.decode(fallback, errors="replace"), fallback, True
+
+
+def _candidate_encodings() -> list[str]:
+    encodings = ["utf-8"]
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            encodings.extend(
+                [
+                    f"cp{ctypes.windll.kernel32.GetOEMCP()}",
+                    f"cp{ctypes.windll.kernel32.GetACP()}",
+                ]
+            )
+        except (AttributeError, OSError):
+            encodings.append("gbk")
+    encodings.append(locale.getpreferredencoding(False) or "utf-8")
+    return encodings

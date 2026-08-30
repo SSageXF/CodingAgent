@@ -4,7 +4,7 @@ import sys
 
 from evidencecoder.guard import Guard, GuardAction
 from evidencecoder.runbook import OperationStatus
-from evidencecoder.tool_impl.commands import LocalCommands
+from evidencecoder.tool_impl.commands import LocalCommands, _decode_output
 
 
 def test_command_records_nonzero_exit_as_observation(tmp_path):
@@ -33,3 +33,10 @@ def test_guard_asks_for_write_by_default_and_allows_read():
     guard = Guard()
     assert guard.assess("write_text", {"path": "x"}).action is GuardAction.ASK
     assert guard.assess("read_segment", {"path": "x"}).action is GuardAction.ALLOW
+
+
+def test_command_output_decoder_handles_utf8_and_gbk():
+    utf8, encoding, replaced = _decode_output("测试".encode("utf-8"), ["utf-8", "gbk"])
+    assert (utf8, encoding, replaced) == ("测试", "utf-8", False)
+    gbk, encoding, replaced = _decode_output("测试".encode("gbk"), ["utf-8", "gbk"])
+    assert (gbk, encoding, replaced) == ("测试", "gbk", False)

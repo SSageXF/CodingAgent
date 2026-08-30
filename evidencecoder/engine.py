@@ -67,11 +67,13 @@ class Engine:
             keep_cycles=settings.context_keep_cycles,
         )
 
-    def run(self, task: str) -> AgentResult:
+    def run(
+        self, task: str, *, prior_context: dict[str, Any] | None = None
+    ) -> AgentResult:
         if not task.strip():
             raise ValueError("task must not be empty")
         self.settings.validate()
-        runbook = RunBook(task.strip())
+        runbook = RunBook(task.strip(), prior_context=prior_context)
         started = time.monotonic()
         consecutive_errors = 0
         protocol_errors = 0
@@ -88,10 +90,18 @@ class Engine:
                 self.context.compact_if_needed(runbook, self.gateway)
                 messages = self.context.compose(runbook)
                 self.observer(f"cycle {cycle_index}: asking model")
+                model_started = time.monotonic()
                 try:
                     reply = self.gateway.complete(messages, self.toolbox.api_specs)
                 except APIError as exc:
                     return self._finish(runbook, RunStatus.FAILED, str(exc))
+
+                self.observer(
+                    f"cycle {cycle_index}: model replied in "
+                    f"{time.monotonic() - model_started:.1f}s"
+                )
+                if reply.content.strip():
+                    self.observer(f"assistant: {reply.content.strip()}")
 
                 runbook.record_assistant(reply)
                 if not reply.tool_calls:
@@ -120,9 +130,11 @@ class Engine:
                             "evidence": outcome.evidence,
                         },
                     )
-                    self.observer(
-                        f"{record.op_id} {call.name}: {outcome.status.value} — {outcome.summary}"
-                    )
+                    if call.name == "run_local" and "exit_code" in outcome.evidence:
+                        label = f"executed, exit={outcome.evidence['exit_code']}"
+                    else:
+                        label = outcome.status.value
+                    self.observer(f"{record.op_id} {call.name}: {label} — {outcome.summary}")
 
                     if outcome.status is OperationStatus.OK:
                         consecutive_errors = 0
@@ -162,8 +174,8 @@ class Engine:
     def _handle_call(
         self, runbook: RunBook, tool: str, arguments_json: str
     ) -> tuple[ToolOutcome, OperationRecord]:
-        started_at = _utc_now()
-        started = time.monotonic()
+        request_started_at = _utc_now()
+        request_started = time.monotonic()
         arguments: dict[str, Any]
         try:
             arguments = self.toolbox.parse_and_validate(tool, arguments_json)
@@ -171,27 +183,67 @@ class Engine:
             arguments = {"raw_arguments": arguments_json}
             outcome = ToolOutcome(OperationStatus.ERROR, str(exc), {})
             return outcome, self._record(
-                runbook, tool, arguments, outcome, started_at, started
+                runbook,
+                tool,
+                arguments,
+                outcome,
+                request_started_at,
+                request_started,
             )
 
         decision = self.guard.assess(tool, arguments)
+        approval_wait_ms = 0
         if decision.action is GuardAction.DENY:
             outcome = ToolOutcome(
                 OperationStatus.DENIED,
                 f"denied by safety policy: {decision.reason}",
                 {},
             )
-        elif decision.action is GuardAction.ASK and not self.approval(
-            tool, arguments, decision.reason
-        ):
-            outcome = ToolOutcome(
-                OperationStatus.DENIED,
-                f"not approved by user: {decision.reason}",
-                {},
-            )
+        elif decision.action is GuardAction.ASK:
+            approval_started = time.monotonic()
+            approved = self.approval(tool, arguments, decision.reason)
+            approval_wait_ms = int((time.monotonic() - approval_started) * 1_000)
+            if not approved:
+                outcome = ToolOutcome(
+                    OperationStatus.DENIED,
+                    f"not approved by user: {decision.reason}",
+                    {},
+                )
+            else:
+                execution_started_at = _utc_now()
+                execution_started = time.monotonic()
+                outcome = self.toolbox.execute(tool, arguments, runbook)
+                return outcome, self._record(
+                    runbook,
+                    tool,
+                    arguments,
+                    outcome,
+                    execution_started_at,
+                    execution_started,
+                    approval_wait_ms=approval_wait_ms,
+                )
         else:
+            execution_started_at = _utc_now()
+            execution_started = time.monotonic()
             outcome = self.toolbox.execute(tool, arguments, runbook)
-        return outcome, self._record(runbook, tool, arguments, outcome, started_at, started)
+            return outcome, self._record(
+                runbook,
+                tool,
+                arguments,
+                outcome,
+                execution_started_at,
+                execution_started,
+            )
+        return outcome, self._record(
+            runbook,
+            tool,
+            arguments,
+            outcome,
+            request_started_at,
+            request_started,
+            approval_wait_ms=approval_wait_ms,
+            duration_override_ms=0,
+        )
 
     @staticmethod
     def _record(
@@ -201,6 +253,9 @@ class Engine:
         outcome: ToolOutcome,
         started_at: str,
         started: float,
+        *,
+        approval_wait_ms: int = 0,
+        duration_override_ms: int | None = None,
     ) -> OperationRecord:
         return runbook.append_operation(
             tool=tool,
@@ -209,7 +264,12 @@ class Engine:
             summary=outcome.summary,
             evidence=outcome.evidence,
             started_at=started_at,
-            duration_ms=int((time.monotonic() - started) * 1_000),
+            duration_ms=(
+                duration_override_ms
+                if duration_override_ms is not None
+                else int((time.monotonic() - started) * 1_000)
+            ),
+            approval_wait_ms=approval_wait_ms,
         )
 
     def _is_repeating(self, runbook: RunBook) -> bool:
