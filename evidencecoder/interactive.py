@@ -137,7 +137,7 @@ class InteractiveShell:
             return True
         if command == "/help":
             self.output(
-                "/help  /status  /history  /new  /resume <id|latest>  "
+                "/help  /status  /history  /new  /resume [id|latest]  "
                 "/retry  /export [path]  /paste  /exit\n"
                 "approval: y=once, n=deny, a=allow this type for this process, q=cancel task"
             )
@@ -177,7 +177,7 @@ class InteractiveShell:
             return False
         if command == "/resume":
             if not argument:
-                self.output("usage: /resume <dialogue-id|latest>")
+                self._pick_dialogue()
                 return False
             try:
                 self.dialogue = self.store.load(argument)
@@ -224,6 +224,44 @@ class InteractiveShell:
             return False
         self.output(f"unknown command: {command}; use /help")
         return False
+
+    def _pick_dialogue(self) -> None:
+        dialogues = self.store.list_recent()
+        if not dialogues:
+            self.output("no saved dialogues exist in this workspace")
+            return
+        if self.ui:
+            self.ui.show_resume_choices(dialogues)
+        else:
+            for index, dialogue in enumerate(dialogues, start=1):
+                latest = dialogue.entries[-1] if dialogue.entries else None
+                context = latest.instruction if latest else "[empty dialogue]"
+                status = latest.status if latest else "empty"
+                self.output(
+                    f"{index}. [{status}] {context} "
+                    f"({len(dialogue.entries)} task(s), {dialogue.updated_at})"
+                )
+        while True:
+            try:
+                answer = self.input(
+                    f"Select dialogue [1-{len(dialogues)}], latest, or q to cancel: "
+                ).strip().lower()
+            except EOFError:
+                return
+            if answer in {"q", "quit", "cancel", ""}:
+                self.output("resume cancelled")
+                return
+            if answer == "latest":
+                selected = dialogues[0]
+                break
+            if answer.isdigit() and 1 <= int(answer) <= len(dialogues):
+                selected = dialogues[int(answer) - 1]
+                break
+            self.output("invalid selection; enter a listed number, latest, or q")
+        self.dialogue = selected
+        self.output(
+            f"resumed dialogue {selected.dialogue_id} with {len(selected.entries)} task(s)"
+        )
 
     def _banner(self) -> None:
         approvals = "pre-approved" if (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Sequence
 
 import pytest
@@ -236,3 +237,46 @@ def test_retry_repeats_last_instruction_and_export_writes_report(tmp_path):
     assert "first result" in report
     assert "retry result" in report
     assert "Usage:" in report
+
+
+def test_resume_without_argument_lists_and_selects_dialogue(tmp_path):
+    store = DialogueStore(tmp_path)
+    older = DialogueBook.create(tmp_path)
+    older.append_result("older context", completed_result("older"))
+    older_path = store.save(older)
+    newer = DialogueBook.create(tmp_path)
+    newer.append_result("newer context", completed_result("newer"))
+    newer_path = store.save(newer)
+    os.utime(older_path, (1, 1))
+    os.utime(newer_path, (2, 2))
+
+    answers = iter(["/resume", "2", "/exit"])
+    output: list[str] = []
+    shell = InteractiveShell(
+        settings_for(tmp_path),
+        FakeGateway([]),
+        input_fn=lambda _: next(answers),
+        output=output.append,
+    )
+    assert shell.run() == 0
+    assert shell.dialogue.dialogue_id == older.dialogue_id
+    assert any("1. [completed] newer context" in line for line in output)
+    assert any("2. [completed] older context" in line for line in output)
+
+
+def test_resume_latest_remains_supported_and_invalid_files_are_skipped(tmp_path):
+    store = DialogueStore(tmp_path)
+    book = DialogueBook.create(tmp_path)
+    book.append_result("latest context", completed_result())
+    store.save(book)
+    (store.directory / "broken.json").write_text("not json", encoding="utf-8")
+
+    shell = InteractiveShell(
+        settings_for(tmp_path),
+        FakeGateway([]),
+        resume="latest",
+        input_fn=lambda _: "/exit",
+        output=lambda _: None,
+    )
+    assert shell.dialogue.dialogue_id == book.dialogue_id
+    assert [item.dialogue_id for item in store.list_recent()] == [book.dialogue_id]

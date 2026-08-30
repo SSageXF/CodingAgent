@@ -157,6 +157,29 @@ class DialogueStore:
         self._verify_workspace(book)
         return book
 
+    def list_recent(self, *, limit: int = 20) -> list[DialogueBook]:
+        """Return valid dialogues for this workspace, newest first."""
+
+        if limit < 1 or not self.directory.is_dir():
+            return []
+        paths = sorted(
+            self.directory.glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        books: list[DialogueBook] = []
+        for path in paths:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                book = _book_from_dict(data)
+                self._verify_workspace(book)
+            except (OSError, json.JSONDecodeError, DialogueError):
+                continue
+            books.append(book)
+            if len(books) >= limit:
+                break
+        return books
+
     def export_markdown(self, book: DialogueBook, relative_path: str | None = None) -> Path:
         self._verify_workspace(book)
         if relative_path:
@@ -214,14 +237,10 @@ class DialogueStore:
 
     def _resolve_selector(self, selector: str) -> Path:
         if selector == "latest":
-            if not self.directory.is_dir():
+            recent = self.list_recent(limit=1)
+            if not recent:
                 raise DialogueError("no saved dialogues exist in this workspace")
-            candidates = sorted(
-                self.directory.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
-            )
-            if not candidates:
-                raise DialogueError("no saved dialogues exist in this workspace")
-            return candidates[0]
+            return self.directory / f"{recent[0].dialogue_id}.json"
         if not _DIALOGUE_ID.fullmatch(selector):
             raise DialogueError("dialogue id must be 12 lowercase hexadecimal characters")
         path = self.directory / f"{selector}.json"

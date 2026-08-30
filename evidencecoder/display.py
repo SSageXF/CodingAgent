@@ -144,6 +144,28 @@ class TerminalUI:
             )
         self.console.print(table)
 
+    def show_resume_choices(self, dialogues: Iterable[Any]) -> None:
+        table = Table(title="Resume dialogue", show_lines=False)
+        table.add_column("#", justify="right", style="bold cyan")
+        table.add_column("Updated")
+        table.add_column("Tasks", justify="right")
+        table.add_column("Status")
+        table.add_column("Latest context")
+        for index, dialogue in enumerate(dialogues, start=1):
+            latest = dialogue.entries[-1] if dialogue.entries else None
+            status = latest.status if latest else "empty"
+            context = latest.instruction if latest else "[empty dialogue]"
+            if len(context) > 72:
+                context = context[:69] + "..."
+            table.add_row(
+                str(index),
+                dialogue.updated_at.replace("T", " ")[:19],
+                str(len(dialogue.entries)),
+                status,
+                Text(context),
+            )
+        self.console.print(table)
+
     def show_status(self, lines: dict[str, str]) -> None:
         table = Table(title="EvidenceCoder status", show_header=False)
         table.add_column("Field", style="bold cyan")

@@ -5,6 +5,7 @@ from io import StringIO
 from rich.console import Console
 
 from evidencecoder.display import TerminalUI, build_diff_preview
+from evidencecoder.dialogue import DialogueBook
 from evidencecoder.engine import AgentResult, RunStatus
 from evidencecoder.runbook import RunBook
 
@@ -35,3 +36,14 @@ def test_rich_result_contains_status_and_usage():
     assert "Status: completed" in rendered
     assert "2 model call(s)" in rendered
     assert "10 in / 3 out" in rendered
+
+
+def test_rich_resume_picker_contains_numbered_context(tmp_path):
+    stream = StringIO()
+    console = Console(file=stream, force_terminal=False, color_system=None, width=100)
+    dialogue = DialogueBook.create(tmp_path)
+    TerminalUI(console).show_resume_choices([dialogue])
+    rendered = stream.getvalue()
+    assert "Resume dialogue" in rendered
+    assert "1" in rendered
+    assert "empty dialogue" in rendered
