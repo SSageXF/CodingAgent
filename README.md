@@ -11,6 +11,24 @@ LangChain、LlamaIndex、OpenAI Agents SDK、Claude Agent SDK、AutoGen 或 Crew
 文件声明必须对应该文件最新一次成功写入；检查声明必须对应发生在最新修改之后、
 退出码为 0 的命令。
 
+## 一分钟理解这个项目
+
+用户给 EvidenceCoder 一条编程任务后，它不是直接生成一大段答案，而是反复执行下面的闭环：
+
+1. 把任务、近期对话、工作区事实和可用工具发给模型；
+2. 检查模型返回的是普通说明还是结构化工具调用；
+3. 在本地校验路径、参数和危险程度，必要时让用户确认；
+4. 执行读取、写入、Git 观察或本地命令，并把真实结果记入 RunBook；
+5. 把结果反馈给模型，让模型继续判断、修改或验证；
+6. 只有 `submit_result` 中的完成声明能被本轮操作凭证证明时，任务才算完成。
+
+因此，模型负责“决定下一步”，EvidenceCoder 负责“允许什么、实际做什么、记录了什么，
+以及模型能否有证据地宣布完成”。API 服务只负责生成 tool call；文件和命令始终由本机执行。
+
+当前版本为 `0.3.1`。自动测试结果为 45 项通过、1 项因本机符号链接能力跳过；三个真实 API
+隔离案例已验证创建程序、复现并修复错误、Git 只读审查以及执行凭证闭环。完整结果和已知问题见
+[真实 API 验收报告](docs/08_REAL_API_ACCEPTANCE_REPORT.md)。
+
 ## 能力边界
 
 - 在指定工作区内列目录、单文件或批量分段读取、搜索、精确替换和写入 UTF-8 文本。
@@ -64,6 +82,13 @@ PowerShell 环境变量用法仍然有效，并可临时覆盖 `.env`。
 evidencecoder --workspace C:\path\to\project
 ```
 
+如果 PowerShell 提示无法识别 `evidencecoder`，通常是可执行脚本目录尚未进入 `PATH`。
+可直接使用等价且更稳妥的模块启动方式：
+
+```powershell
+python -m evidencecoder --workspace C:\path\to\project
+```
+
 直接输入任务即可连续工作；内置命令为 `/help`、`/status`、`/history`、`/new`、
 `/resume [id|latest]`、`/retry`、`/export [path]`、`/paste` 和 `/exit`。不带参数的
 `/resume` 会列出当前工作区的最近对话，输入序号即可恢复；`/resume latest` 和指定 ID
@@ -101,6 +126,50 @@ evidencecoder --yes --workspace . "修复测试失败"
 ```powershell
 python -m evidencecoder --help
 ```
+
+## 视频演示推荐
+
+仓库已经提供一个固定、可复现的运费边界错误项目，不需要另外寻找测试项目。先在
+EvidenceCoder 仓库根目录运行准备脚本；脚本会把模板复制到系统临时目录，初始化为独立 Git
+仓库并提交有缺陷的初始版本，不会修改当前项目仓库：
+
+```powershell
+$demo = powershell -ExecutionPolicy Bypass -File .\demo\prepare_video_demo.ps1
+python -m unittest discover -s "$demo\tests" -v
+```
+
+第二条命令应显示 3 项测试中 1 项失败：100 元订单本应免运费，却被计算为 8 元；结算总额也
+因此从预期的 100 元变成 108 元。这让观看者在 Agent 启动前就能明确看到问题和验收标准。
+
+然后进入交互模式。演示时不要使用 `--yes`，这样视频能展示写入 diff 和人工审批：
+
+```powershell
+python -m evidencecoder --workspace $demo
+```
+
+进入后只输入这一句：
+
+```text
+请先读取 VIDEO_TASK.txt，然后严格按照文件中的要求完成任务。
+```
+
+详细提示词已经保存在演示项目的 `VIDEO_TASK.txt` 中。让 Agent 自己读取它，比在终端粘贴一大段
+任务更能直观证明本地文件读取能力。该文件明确要求 Agent 使用 `inspect_tree`、`git_status`、
+`git_diff`、`read_many`、`run_local`、文件修改和 `submit_result`，并禁止联网、安装依赖、修改
+测试或执行 Git 写操作。
+
+这一个固定任务可以在较短视频中集中展示：
+
+- `inspect_tree`、`git_status`、`git_diff` 和 `read_many` 的观察能力；
+- 失败命令作为有效观察反馈给模型；
+- 写入前的 unified diff 与人工审批；
+- 模型根据工具结果继续迭代，而不是一次性输出代码；
+- 修改后的完整测试和 `submit_result` 凭证校验；
+- 最终面板中的修改文件、检查记录、限制、耗时和 token 用量。
+
+预期修复仅把 `shipping.py` 中免运费判断的 `>` 改为 `>=`，测试文件不变，最终 3 项测试全部
+通过。演示后可继续输入 `/history`、`/status`、`/export demo-report.md`，再用 `/new` 和
+`/resume` 展示对话保存与恢复；这些斜杠命令不必塞进同一条修复任务。
 
 ## 架构
 
@@ -143,6 +212,18 @@ python -m pytest
 它还覆盖路径穿越、符号链接越界、精确替换、命令超时、API 重试、危险命令、schema、
 `.env` 配置与优先级、上下文压缩、对话恢复、Rich 输出、diff 预览、批量读取、只读 Git、
 使用统计、报告导出、Windows 输出解码、计时边界和主要终止条件。
+
+## 完成度与已知限制
+
+对照项目最初要求，当前版本已经独立实现：模型 API 调用、上下文管理、固定工具定义与本地
+分派、模型输出解析、Agent 循环、完成校验、错误处理、CLI 交互、对话恢复和运行记录。它没有
+使用 Agent 框架、服务端代码执行器或其他 Coding Agent 作为运行时。
+
+目前最重要的限制是 `run_local` 仍然属于本机 Shell，而不是操作系统级沙箱。真实 API 验收中，
+模型曾在自动批准模式下执行 `git config --global`；测试新增的配置已经撤销，但这证明普通命令
+仍可能在工作区外产生副作用。因此在实现更严格的子进程隔离前，建议保留人工命令审批，不要对
+不熟悉的仓库使用 `--yes`。此外，项目尚不提供流式输出、撤销、浏览器、MCP、插件、多 Agent、
+自动 Git 提交/推送或全屏 TUI；这些是明确的范围选择，不影响本次考核要求中的核心闭环。
 
 ## 独立性说明
 
