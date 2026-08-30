@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from evidencecoder.api_link import ModelReply
@@ -20,6 +22,11 @@ def test_schema_rejects_unknown_fields_and_wrong_boolean(tmp_path):
         toolbox.parse_and_validate("write_text", '{"path":"x","content":"","overwrite":1}')
     with pytest.raises(UnknownToolError):
         toolbox.parse_and_validate("not_a_tool", "{}")
+    with pytest.raises(ToolArgumentsError, match="too many"):
+        toolbox.parse_and_validate(
+            "read_many",
+            json.dumps({"items": [{"path": "x"}] * 11}),
+        )
 
 
 def test_defaults_are_applied(tmp_path):
@@ -27,6 +34,22 @@ def test_defaults_are_applied(tmp_path):
         "inspect_tree", "{}"
     )
     assert arguments == {"path": ".", "max_depth": 3, "max_entries": 200}
+
+
+def test_tool_catalog_contains_ten_fixed_tools(tmp_path):
+    names = {item["function"]["name"] for item in make_toolbox(tmp_path).api_specs}
+    assert names == {
+        "inspect_tree",
+        "read_segment",
+        "read_many",
+        "find_matches",
+        "replace_text",
+        "write_text",
+        "run_local",
+        "git_status",
+        "git_diff",
+        "submit_result",
+    }
 
 
 def test_completion_requires_write_and_successful_check_evidence(tmp_path):

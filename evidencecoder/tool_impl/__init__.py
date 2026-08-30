@@ -2,5 +2,6 @@
 
 from .commands import LocalCommands
 from .files import WorkspaceFiles
+from .git_tools import GitTools
 
-__all__ = ["LocalCommands", "WorkspaceFiles"]
+__all__ = ["GitTools", "LocalCommands", "WorkspaceFiles"]

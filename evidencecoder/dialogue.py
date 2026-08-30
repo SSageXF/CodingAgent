@@ -33,6 +33,10 @@ class DialogueEntry:
     changed_files: tuple[str, ...] = ()
     checks: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
+    model_calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    duration_seconds: float = 0.0
     completed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -71,6 +75,10 @@ class DialogueBook:
             changed_files=tuple(str(item) for item in completion.get("changed_files", [])),
             checks=tuple(str(item) for item in completion.get("checks", [])),
             limitations=tuple(str(item) for item in completion.get("limitations", [])),
+            model_calls=result.runbook.model_calls,
+            prompt_tokens=result.runbook.prompt_tokens,
+            completion_tokens=result.runbook.completion_tokens,
+            duration_seconds=result.duration_seconds,
             completed_at=_utc_now(),
         )
         self.entries.append(entry)
@@ -149,6 +157,61 @@ class DialogueStore:
         self._verify_workspace(book)
         return book
 
+    def export_markdown(self, book: DialogueBook, relative_path: str | None = None) -> Path:
+        self._verify_workspace(book)
+        if relative_path:
+            requested = Path(relative_path)
+            if requested.is_absolute() or requested.drive:
+                raise DialogueError("export path must be relative to the workspace")
+            destination = (self.workspace / requested).resolve(strict=False)
+            try:
+                destination.relative_to(self.workspace)
+            except ValueError as exc:
+                raise DialogueError("export path resolves outside the workspace") from exc
+            if destination.suffix.lower() != ".md":
+                raise DialogueError("export report path must end with .md")
+            if destination.exists():
+                raise DialogueError(f"export target already exists: {relative_path}")
+        else:
+            destination = (
+                self.workspace
+                / ".evidencecoder"
+                / "exports"
+                / f"dialogue-{book.dialogue_id}.md"
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            "# EvidenceCoder dialogue report",
+            "",
+            f"- Dialogue: `{book.dialogue_id}`",
+            f"- Created: {book.created_at}",
+            f"- Updated: {book.updated_at}",
+            "",
+        ]
+        for index, entry in enumerate(book.entries, start=1):
+            lines.extend(
+                [
+                    f"## {index}. {_markdown_text(entry.instruction)}",
+                    "",
+                    f"- Status: `{entry.status}`",
+                    f"- Summary: {_markdown_text(entry.summary)}",
+                    f"- Changed files: {_markdown_list(entry.changed_files)}",
+                    f"- Checks: {_markdown_list(entry.checks)}",
+                    f"- Limitations: {_markdown_list(entry.limitations)}",
+                    f"- Usage: {entry.model_calls} model calls, {entry.prompt_tokens} input tokens, "
+                    f"{entry.completion_tokens} output tokens, {entry.duration_seconds:.1f}s",
+                    "",
+                ]
+            )
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text("\n".join(lines), encoding="utf-8", newline="")
+            os.replace(temporary, destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return destination
+
     def _resolve_selector(self, selector: str) -> Path:
         if selector == "latest":
             if not self.directory.is_dir():
@@ -193,10 +256,14 @@ def _book_from_dict(data: object) -> DialogueBook:
                     changed_files=tuple(str(item) for item in raw.get("changed_files", [])),
                     checks=tuple(str(item) for item in raw.get("checks", [])),
                     limitations=tuple(str(item) for item in raw.get("limitations", [])),
+                    model_calls=int(raw.get("model_calls", 0)),
+                    prompt_tokens=int(raw.get("prompt_tokens", 0)),
+                    completion_tokens=int(raw.get("completion_tokens", 0)),
+                    duration_seconds=float(raw.get("duration_seconds", 0.0)),
                     completed_at=str(raw["completed_at"]),
                 )
             )
-        except (KeyError, TypeError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             raise DialogueError("dialogue entry is missing required fields") from exc
     return DialogueBook(
         format_version=FORMAT_VERSION,
@@ -217,3 +284,11 @@ def _workspace_fingerprint(workspace: Path | str) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _markdown_text(value: str) -> str:
+    return value.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+
+
+def _markdown_list(values: tuple[str, ...]) -> str:
+    return ", ".join(f"`{value.replace('`', '')}`" for value in values) or "none"

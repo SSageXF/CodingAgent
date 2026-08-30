@@ -25,6 +25,25 @@ class RunStatus(str, Enum):
     FAILED = "failed"
 
 
+class EventKind(str, Enum):
+    MODEL_START = "model_start"
+    MODEL_END = "model_end"
+    ASSISTANT = "assistant"
+    TOOL_RESULT = "tool_result"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentEvent:
+    kind: EventKind
+    cycle: int
+    message: str = ""
+    tool: str | None = None
+    op_id: str | None = None
+    status: str | None = None
+    elapsed_seconds: float | None = None
+    evidence: dict[str, Any] | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class AgentResult:
     status: RunStatus
@@ -32,10 +51,11 @@ class AgentResult:
     runbook: RunBook
     completion: dict[str, Any] | None = None
     log_path: str | None = None
+    duration_seconds: float = 0.0
 
 
 ApprovalCallback = Callable[[str, dict[str, Any], str], bool]
-Observer = Callable[[str], None]
+Observer = Callable[[AgentEvent], None]
 
 
 class Engine:
@@ -53,7 +73,7 @@ class Engine:
         self.settings = settings
         self.gateway = gateway
         self.approval = approval or (lambda _tool, _arguments, _reason: False)
-        self.observer = observer or (lambda _message: None)
+        self.observer = observer or (lambda _event: None)
         self.toolbox = toolbox or Toolbox(
             WorkspaceFiles(settings.workspace),
             LocalCommands(settings.workspace, settings.command_timeout_seconds),
@@ -75,6 +95,7 @@ class Engine:
         self.settings.validate()
         runbook = RunBook(task.strip(), prior_context=prior_context)
         started = time.monotonic()
+        self._run_started = started
         consecutive_errors = 0
         protocol_errors = 0
 
@@ -89,19 +110,34 @@ class Engine:
 
                 self.context.compact_if_needed(runbook, self.gateway)
                 messages = self.context.compose(runbook)
-                self.observer(f"cycle {cycle_index}: asking model")
+                self.observer(AgentEvent(EventKind.MODEL_START, cycle_index))
                 model_started = time.monotonic()
+                runbook.record_model_call()
                 try:
                     reply = self.gateway.complete(messages, self.toolbox.api_specs)
                 except APIError as exc:
+                    self.observer(
+                        AgentEvent(
+                            EventKind.MODEL_END,
+                            cycle_index,
+                            message=str(exc),
+                            status="error",
+                            elapsed_seconds=time.monotonic() - model_started,
+                        )
+                    )
                     return self._finish(runbook, RunStatus.FAILED, str(exc))
 
                 self.observer(
-                    f"cycle {cycle_index}: model replied in "
-                    f"{time.monotonic() - model_started:.1f}s"
+                    AgentEvent(
+                        EventKind.MODEL_END,
+                        cycle_index,
+                        elapsed_seconds=time.monotonic() - model_started,
+                    )
                 )
                 if reply.content.strip():
-                    self.observer(f"assistant: {reply.content.strip()}")
+                    self.observer(
+                        AgentEvent(EventKind.ASSISTANT, cycle_index, reply.content.strip())
+                    )
 
                 runbook.record_assistant(reply)
                 if not reply.tool_calls:
@@ -134,7 +170,17 @@ class Engine:
                         label = f"executed, exit={outcome.evidence['exit_code']}"
                     else:
                         label = outcome.status.value
-                    self.observer(f"{record.op_id} {call.name}: {label} — {outcome.summary}")
+                    self.observer(
+                        AgentEvent(
+                            EventKind.TOOL_RESULT,
+                            cycle_index,
+                            message=outcome.summary,
+                            tool=call.name,
+                            op_id=record.op_id,
+                            status=label,
+                            evidence=outcome.evidence,
+                        )
+                    )
 
                     if outcome.status is OperationStatus.OK:
                         consecutive_errors = 0
@@ -294,7 +340,9 @@ class Engine:
                 log_path = str(path)
             except OSError as exc:
                 summary = f"{summary} (run log could not be saved: {exc})"
-        return AgentResult(status, summary, runbook, completion, log_path)
+        run_started = getattr(self, "_run_started", None)
+        duration = max(0.0, time.monotonic() - run_started) if run_started is not None else 0.0
+        return AgentResult(status, summary, runbook, completion, log_path, duration)
 
 
 def _utc_now() -> str:

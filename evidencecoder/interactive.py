@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
 from .dialogue import DialogueBook, DialogueError, DialogueStore
-from .display import print_agent_result
-from .engine import Engine
+from .display import TerminalUI, print_agent_result
+from .engine import AgentEvent, Engine, EventKind
 from .settings import Settings
 
 
@@ -17,17 +18,29 @@ OutputFunction = Callable[[str], None]
 
 
 class ApprovalManager:
-    def __init__(self, input_fn: InputFunction = input, output: OutputFunction = print) -> None:
+    def __init__(
+        self,
+        input_fn: InputFunction = input,
+        output: OutputFunction = print,
+        *,
+        workspace: Path | None = None,
+        ui: TerminalUI | None = None,
+    ) -> None:
         self.input = input_fn
         self.output = output
+        self.workspace = workspace
+        self.ui = ui
         self.approved_categories: set[str] = set()
 
     def __call__(self, tool: str, arguments: dict[str, Any], reason: str) -> bool:
         category = "command" if tool == "run_local" else "write"
         if category in self.approved_categories:
             return True
-        self.output(f"\nApproval required: {tool} ({reason})")
-        self.output(json.dumps(arguments, ensure_ascii=False, indent=2))
+        if self.ui is not None and self.workspace is not None:
+            self.ui.show_approval(tool, arguments, reason, self.workspace)
+        else:
+            self.output(f"\nApproval required: {tool} ({reason})")
+            self.output(json.dumps(arguments, ensure_ascii=False, indent=2))
         while True:
             try:
                 answer = self.input("Execute? [y]es/[n]o/[a]ll this type/[q]uit task: ").strip().lower()
@@ -54,14 +67,21 @@ class InteractiveShell:
         resume: str | None = None,
         input_fn: InputFunction = input,
         output: OutputFunction = print,
+        ui: TerminalUI | None = None,
     ) -> None:
         self.settings = settings
         self.gateway = gateway
         self.input = input_fn
         self.output = output
+        self.ui = ui
         self.store = DialogueStore(settings.workspace)
         self.dialogue = self.store.load(resume) if resume else DialogueBook.create(settings.workspace)
-        self.approval = ApprovalManager(input_fn, output)
+        self.approval = ApprovalManager(
+            input_fn,
+            output,
+            workspace=settings.workspace,
+            ui=ui,
+        )
 
     def run(self) -> int:
         self._banner()
@@ -104,7 +124,10 @@ class InteractiveShell:
         result = engine.run(instruction, prior_context=self.dialogue.project())
         self.dialogue.append_result(instruction, result)
         self.store.save(self.dialogue)
-        print_agent_result(result, output=self.output)
+        if self.ui:
+            self.ui.show_result(result)
+        else:
+            print_agent_result(result, output=self.output)
 
     def _command(self, raw: str) -> bool:
         command, _, argument = raw.partition(" ")
@@ -115,25 +138,37 @@ class InteractiveShell:
         if command == "/help":
             self.output(
                 "/help  /status  /history  /new  /resume <id|latest>  "
-                "/paste  /exit\n"
+                "/retry  /export [path]  /paste  /exit\n"
                 "approval: y=once, n=deny, a=allow this type for this process, q=cancel task"
             )
             return False
         if command == "/status":
-            status = (
-                f"workspace={self.settings.workspace}\nmodel={self.settings.model}\n"
-                f"dialogue={self.dialogue.dialogue_id}\ntasks={len(self.dialogue.entries)}"
-            )
+            fields = {
+                "Workspace": str(self.settings.workspace),
+                "Model": self.settings.model,
+                "Dialogue": self.dialogue.dialogue_id,
+                "Tasks": str(len(self.dialogue.entries)),
+            }
             if self.dialogue.entries:
                 latest = self.dialogue.entries[-1]
-                status += f"\nlatest=[{latest.status}] {latest.summary}"
-            self.output(status)
+                fields["Latest"] = f"[{latest.status}] {latest.summary}"
+                fields["Latest usage"] = (
+                    f"{latest.model_calls} model calls, {latest.prompt_tokens} in / "
+                    f"{latest.completion_tokens} out, {latest.duration_seconds:.1f}s"
+                )
+            if self.ui:
+                self.ui.show_status(fields)
+            else:
+                self.output("\n".join(f"{key.lower()}={value}" for key, value in fields.items()))
             return False
         if command == "/history":
-            if not self.dialogue.entries:
-                self.output("[no tasks in this dialogue]")
-            for index, entry in enumerate(self.dialogue.entries, start=1):
-                self.output(f"{index}. [{entry.status}] {entry.instruction} — {entry.summary}")
+            if self.ui:
+                self.ui.show_history(self.dialogue.entries)
+            else:
+                if not self.dialogue.entries:
+                    self.output("[no tasks in this dialogue]")
+                for index, entry in enumerate(self.dialogue.entries, start=1):
+                    self.output(f"{index}. [{entry.status}] {entry.instruction} — {entry.summary}")
             return False
         if command == "/new":
             self.dialogue = DialogueBook.create(self.settings.workspace)
@@ -153,6 +188,24 @@ class InteractiveShell:
                     f"resumed dialogue {self.dialogue.dialogue_id} "
                     f"with {len(self.dialogue.entries)} task(s)"
                 )
+            return False
+        if command == "/retry":
+            if argument:
+                self.output("usage: /retry")
+            elif not self.dialogue.entries:
+                self.output("nothing to retry in this dialogue")
+            else:
+                instruction = self.dialogue.entries[-1].instruction
+                self.output(f"retrying: {instruction}")
+                self._run_instruction(instruction)
+            return False
+        if command == "/export":
+            try:
+                path = self.store.export_markdown(self.dialogue, argument or None)
+            except DialogueError as exc:
+                self.output(f"export failed: {exc}")
+            else:
+                self.output(f"exported dialogue report: {path}")
             return False
         if command == "/paste":
             lines: list[str] = []
@@ -176,11 +229,33 @@ class InteractiveShell:
         approvals = "pre-approved" if (
             self.settings.auto_approve_writes and self.settings.auto_approve_commands
         ) else "ask"
-        self.output(
-            f"EvidenceCoder {__version__} interactive\nworkspace: {self.settings.workspace}\n"
-            f"model: {self.settings.model}\napprovals: {approvals}\n"
-            f"dialogue: {self.dialogue.dialogue_id}\ntype /help for commands"
-        )
+        if self.ui:
+            self.ui.banner(
+                version=__version__,
+                workspace=self.settings.workspace,
+                model=self.settings.model,
+                approvals=approvals,
+                dialogue_id=self.dialogue.dialogue_id,
+            )
+            self.ui.message("Type /help for commands", style="dim")
+        else:
+            self.output(
+                f"EvidenceCoder {__version__} interactive\nworkspace: {self.settings.workspace}\n"
+                f"model: {self.settings.model}\napprovals: {approvals}\n"
+                f"dialogue: {self.dialogue.dialogue_id}\ntype /help for commands"
+            )
 
-    def _event(self, message: str) -> None:
-        self.output(f"[EvidenceCoder] {message}")
+    def _event(self, event: AgentEvent) -> None:
+        if self.ui:
+            self.ui.on_event(event)
+        elif event.kind is EventKind.TOOL_RESULT:
+            self.output(f"[EvidenceCoder] {event.op_id} {event.tool}: {event.status} — {event.message}")
+        elif event.kind is EventKind.MODEL_START:
+            self.output(f"[EvidenceCoder] cycle {event.cycle}: asking model")
+        elif event.kind is EventKind.MODEL_END:
+            self.output(
+                f"[EvidenceCoder] cycle {event.cycle}: model replied in "
+                f"{(event.elapsed_seconds or 0):.1f}s"
+            )
+        elif event.message:
+            self.output(f"[EvidenceCoder] assistant: {event.message}")

@@ -188,3 +188,51 @@ def test_approval_all_is_category_scoped_and_quit_interrupts():
     quitting = ApprovalManager(input_fn=lambda _: "q", output=lambda _: None)
     with pytest.raises(KeyboardInterrupt):
         quitting("run_local", {"command": "stop"}, "command")
+
+
+def test_retry_repeats_last_instruction_and_export_writes_report(tmp_path):
+    gateway = FakeGateway(
+        [
+            tool("a1", "inspect_tree", {}),
+            tool(
+                "a2",
+                "submit_result",
+                {
+                    "summary": "first result",
+                    "changed_files": [],
+                    "checks": [],
+                    "evidence_ids": ["op-0001"],
+                    "limitations": [],
+                },
+            ),
+            tool("b1", "inspect_tree", {}),
+            tool(
+                "b2",
+                "submit_result",
+                {
+                    "summary": "retry result",
+                    "changed_files": [],
+                    "checks": [],
+                    "evidence_ids": ["op-0001"],
+                    "limitations": [],
+                },
+            ),
+        ]
+    )
+    answers = iter(["inspect project", "/retry", "/export report.md", "/exit"])
+    output: list[str] = []
+    shell = InteractiveShell(
+        settings_for(tmp_path),
+        gateway,
+        input_fn=lambda _: next(answers),
+        output=output.append,
+    )
+    assert shell.run() == 0
+    assert [entry.instruction for entry in shell.dialogue.entries] == [
+        "inspect project",
+        "inspect project",
+    ]
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "first result" in report
+    assert "retry result" in report
+    assert "Usage:" in report

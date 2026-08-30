@@ -75,6 +75,10 @@ class RunBook:
         self.operations: list[OperationRecord] = []
         self.summary: dict[str, Any] | None = None
         self.archived_before_cycle = 0
+        self.model_calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.usage_reports = 0
         self._next_operation = 1
 
     @property
@@ -82,6 +86,7 @@ class RunBook:
         return len(self.cycles)
 
     def record_assistant(self, reply: ModelReply) -> CycleTranscript:
+        self.record_model_usage(reply)
         tool_calls = [
             {
                 "id": call.call_id,
@@ -99,6 +104,17 @@ class RunBook:
         cycle = CycleTranscript(index=len(self.cycles) + 1, assistant_message=message)
         self.cycles.append(cycle)
         return cycle
+
+    def record_model_call(self) -> None:
+        self.model_calls += 1
+
+    def record_model_usage(self, reply: ModelReply) -> None:
+        if reply.prompt_tokens is not None:
+            self.prompt_tokens += reply.prompt_tokens
+        if reply.completion_tokens is not None:
+            self.completion_tokens += reply.completion_tokens
+        if reply.prompt_tokens is not None or reply.completion_tokens is not None:
+            self.usage_reports += 1
 
     def record_tool_message(self, call_id: str, content: dict[str, Any]) -> None:
         cycle = self._require_cycle()
@@ -177,6 +193,12 @@ class RunBook:
             "started_at": self.started_at,
             "summary": self.summary,
             "archived_before_cycle": self.archived_before_cycle,
+            "usage": {
+                "model_calls": self.model_calls,
+                "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens,
+                "reported_calls": self.usage_reports,
+            },
             "cycles": [
                 {
                     "index": cycle.index,

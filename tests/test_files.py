@@ -73,3 +73,28 @@ def test_inspect_tree_excludes_runtime_directories(tmp_path):
     )
     assert "visible.txt" in outcome.summary
     assert ".git" not in outcome.summary
+
+
+def test_read_many_reads_bounded_segments(tmp_path):
+    (tmp_path / "one.py").write_text("one = 1\nline = 2\n", encoding="utf-8")
+    (tmp_path / "two.py").write_text("two = 2\n", encoding="utf-8")
+    outcome = WorkspaceFiles(tmp_path).read_many(
+        {
+            "items": [
+                {"path": "one.py", "start_line": 1, "end_line": 1},
+                {"path": "two.py", "start_line": 1, "end_line": 2},
+            ]
+        }
+    )
+    assert outcome.status is OperationStatus.OK
+    assert "===== one.py =====" in outcome.summary
+    assert "one = 1" in outcome.summary
+    assert "line = 2" not in outcome.summary
+    assert "two = 2" in outcome.summary
+    assert outcome.evidence["file_count"] == 2
+
+
+def test_read_many_rejects_too_many_files(tmp_path):
+    files = WorkspaceFiles(tmp_path)
+    with pytest.raises(FileToolError, match="at most 10"):
+        files.read_many({"items": [{"path": "x"}] * 11})

@@ -21,6 +21,8 @@ class WorkspaceFiles:
     MAX_TEXT_BYTES = 1_000_000
     MAX_READ_LINES = 400
     MAX_WRITE_BYTES = 1_000_000
+    MAX_BATCH_FILES = 10
+    MAX_BATCH_CHARS = 24_000
 
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root).expanduser().resolve(strict=True)
@@ -115,6 +117,41 @@ class WorkspaceFiles:
                 "end_line": min(end_line, len(lines)),
                 "total_lines": len(lines),
                 "sha256": _sha256_bytes(text.encode("utf-8")),
+            },
+        )
+
+    def read_many(self, arguments: dict[str, Any]) -> ToolOutcome:
+        items = arguments["items"]
+        if len(items) > self.MAX_BATCH_FILES:
+            raise FileToolError(f"read_many accepts at most {self.MAX_BATCH_FILES} files")
+        rendered: list[str] = []
+        evidence: list[dict[str, Any]] = []
+        total = 0
+        truncated = False
+        for item in items:
+            outcome = self.read_segment(item)
+            header = f"===== {outcome.evidence['path']} =====\n"
+            block = header + outcome.summary
+            remaining = self.MAX_BATCH_CHARS - total
+            if remaining <= 0:
+                truncated = True
+                break
+            if len(block) > remaining:
+                block = block[:remaining] + "\n[batch output truncated]"
+                truncated = True
+            rendered.append(block)
+            total += len(block)
+            evidence.append(outcome.evidence)
+            if truncated:
+                break
+        return ToolOutcome(
+            OperationStatus.OK,
+            "\n\n".join(rendered),
+            {
+                "files": evidence,
+                "file_count": len(evidence),
+                "requested_count": len(items),
+                "truncated": truncated,
             },
         )
 

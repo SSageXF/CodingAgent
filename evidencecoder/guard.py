@@ -51,7 +51,15 @@ _DANGEROUS_COMMANDS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 class Guard:
-    READ_ONLY_TOOLS = {"inspect_tree", "read_segment", "find_matches", "submit_result"}
+    READ_ONLY_TOOLS = {
+        "inspect_tree",
+        "read_segment",
+        "read_many",
+        "find_matches",
+        "git_status",
+        "git_diff",
+        "submit_result",
+    }
     WRITE_TOOLS = {"replace_text", "write_text"}
 
     def __init__(

@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from .completion import CompletionVerifier
 from .runbook import OperationStatus, RunBook, ToolOutcome
-from .tool_impl import LocalCommands, WorkspaceFiles
+from .tool_impl import GitTools, LocalCommands, WorkspaceFiles
 
 
 class ToolArgumentsError(ValueError):
@@ -42,6 +42,7 @@ class Toolbox:
     def __init__(self, workspace: WorkspaceFiles, commands: LocalCommands) -> None:
         self.workspace = workspace
         self.commands = commands
+        self.git = GitTools(workspace.root)
         self.completion = CompletionVerifier()
         self._definitions = self._build_definitions()
 
@@ -98,6 +99,30 @@ class Toolbox:
                 lambda args, _: self.workspace.read_segment(args),
             ),
             ToolDefinition(
+                "read_many",
+                "Read bounded line ranges from up to ten UTF-8 workspace files in one call.",
+                object_schema(
+                    {
+                        "items": _array(
+                            object_schema(
+                                {
+                                    "path": _string(),
+                                    "start_line": _integer(
+                                        default=1, minimum=1, maximum=10_000_000
+                                    ),
+                                    "end_line": _integer(minimum=1, maximum=10_000_000),
+                                },
+                                required=["path"],
+                            ),
+                            min_items=1,
+                            max_items=10,
+                        )
+                    },
+                    required=["items"],
+                ),
+                lambda args, _: self.workspace.read_many(args),
+            ),
+            ToolDefinition(
                 "find_matches",
                 "Search workspace text for a literal or regular-expression pattern "
                 "using bounded output.",
@@ -152,6 +177,24 @@ class Toolbox:
                     required=["command"],
                 ),
                 lambda args, _: self.commands.run_local(args),
+            ),
+            ToolDefinition(
+                "git_status",
+                "Read the current branch and concise working-tree status. The workspace must be the repository root.",
+                object_schema({}),
+                lambda args, _: self.git.status(args),
+            ),
+            ToolDefinition(
+                "git_diff",
+                "Read a bounded unstaged or staged Git diff without modifying the repository.",
+                object_schema(
+                    {
+                        "path": _string(),
+                        "staged": _boolean(default=False),
+                        "max_chars": _integer(default=12_000, minimum=1_000, maximum=20_000),
+                    }
+                ),
+                lambda args, _: self.git.diff(args),
             ),
             ToolDefinition(
                 "submit_result",
@@ -212,6 +255,8 @@ def _validate(value: Any, schema: dict[str, Any], *, path: str) -> None:
             raise ToolArgumentsError(f"{path} must be an array")
         if len(value) < schema.get("minItems", 0):
             raise ToolArgumentsError(f"{path} does not have enough items")
+        if len(value) > schema.get("maxItems", len(value)):
+            raise ToolArgumentsError(f"{path} has too many items")
         for index, item in enumerate(value):
             _validate(item, schema["items"], path=f"{path}[{index}]")
         return
@@ -258,8 +303,12 @@ def _boolean(*, default: bool | None = None) -> dict[str, Any]:
     return schema
 
 
-def _array(items: dict[str, Any], *, min_items: int = 0) -> dict[str, Any]:
+def _array(
+    items: dict[str, Any], *, min_items: int = 0, max_items: int | None = None
+) -> dict[str, Any]:
     schema: dict[str, Any] = {"type": "array", "items": items}
     if min_items:
         schema["minItems"] = min_items
+    if max_items is not None:
+        schema["maxItems"] = max_items
     return schema

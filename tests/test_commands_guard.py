@@ -33,6 +33,9 @@ def test_guard_asks_for_write_by_default_and_allows_read():
     guard = Guard()
     assert guard.assess("write_text", {"path": "x"}).action is GuardAction.ASK
     assert guard.assess("read_segment", {"path": "x"}).action is GuardAction.ALLOW
+    assert guard.assess("read_many", {"items": []}).action is GuardAction.ALLOW
+    assert guard.assess("git_status", {}).action is GuardAction.ALLOW
+    assert guard.assess("git_diff", {}).action is GuardAction.ALLOW
 
 
 def test_command_output_decoder_handles_utf8_and_gbk():

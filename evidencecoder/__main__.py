@@ -9,9 +9,9 @@ import sys
 from . import __version__
 from .api_link import APILink
 from .dialogue import DialogueError
-from .display import confirm_tool, print_agent_result, print_event
+from .display import TerminalUI
 from .engine import Engine, RunStatus
-from .interactive import InteractiveShell
+from .interactive import ApprovalManager, InteractiveShell
 from .settings import Settings
 
 
@@ -79,17 +79,18 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=settings.request_timeout_seconds,
         max_retries=settings.api_max_retries,
     ) as gateway:
+        ui = TerminalUI()
         if task:
             result = Engine(
                 settings,
                 gateway,
-                approval=confirm_tool,
-                observer=print_event,
+                approval=ApprovalManager(workspace=settings.workspace, ui=ui),
+                observer=ui.on_event,
             ).run(task)
-            print_agent_result(result)
+            ui.show_result(result)
             return 0 if result.status is RunStatus.COMPLETED else 1
         try:
-            return InteractiveShell(settings, gateway, resume=args.resume).run()
+            return InteractiveShell(settings, gateway, resume=args.resume, ui=ui).run()
         except (ValueError, DialogueError) as exc:
             print(f"interactive error: {exc}", file=sys.stderr)
             return 2

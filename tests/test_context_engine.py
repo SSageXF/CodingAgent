@@ -75,6 +75,45 @@ def test_full_engine_loop_requires_evidence_and_completes(tmp_path):
         "run_local",
         "submit_result",
     ]
+    assert result.runbook.model_calls == 3
+
+
+def test_engine_accumulates_reported_token_usage(tmp_path):
+    gateway = FakeGateway(
+        [
+            ModelReply(
+                "",
+                (ModelToolCall("c1", "inspect_tree", "{}"),),
+                prompt_tokens=11,
+                completion_tokens=2,
+            ),
+            ModelReply(
+                "",
+                (
+                    ModelToolCall(
+                        "c2",
+                        "submit_result",
+                        json.dumps(
+                            {
+                                "summary": "done",
+                                "changed_files": [],
+                                "checks": [],
+                                "evidence_ids": ["op-0001"],
+                                "limitations": [],
+                            }
+                        ),
+                    ),
+                ),
+                prompt_tokens=13,
+                completion_tokens=4,
+            ),
+        ]
+    )
+    result = Engine(settings_for(tmp_path), gateway).run("inspect")
+    assert result.status is RunStatus.COMPLETED
+    assert result.runbook.model_calls == 2
+    assert result.runbook.prompt_tokens == 24
+    assert result.runbook.completion_tokens == 6
 
 
 def test_prior_context_and_platform_facts_are_projected(tmp_path):
