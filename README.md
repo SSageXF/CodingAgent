@@ -32,13 +32,23 @@ cd C:\path\to\CodingAgent
 python -m pip install -e .
 ```
 
-配置环境变量（程序不会自动读取 `.env`）：
+复制模板并填写本地配置；`.env` 已被 Git 忽略，不会上传：
 
 ```powershell
-$env:EVIDENCECODER_MODEL = "your-model-name"
-$env:EVIDENCECODER_BASE_URL = "https://api.openai.com/v1"
-$env:EVIDENCECODER_API_KEY = "your-key"
+Copy-Item .env.example .env
+notepad .env
 ```
+
+程序从启动命令所在目录读取 `.env`。格式见 [.env.example](.env.example)：
+
+```dotenv
+EVIDENCECODER_MODEL=your-model-name
+EVIDENCECODER_BASE_URL=https://api.openai.com/v1
+EVIDENCECODER_API_KEY=replace-me
+```
+
+配置优先级为命令行参数、已有系统环境变量、`.env`、程序默认值。也就是说，原来的
+PowerShell 环境变量用法仍然有效，并可临时覆盖 `.env`。
 
 兼容网关需要支持 `/chat/completions` 以及 `tools`/`tool_calls` 字段。
 
@@ -118,7 +128,7 @@ python -m pytest
 
 测试包含本地 `FakeGateway`，无需 API Key 即可验证完整的写入—命令—凭证提交循环。
 它还覆盖路径穿越、符号链接越界、精确替换、命令超时、API 重试、危险命令、schema、
-上下文压缩、对话恢复、Windows 输出解码、计时边界和主要终止条件。
+`.env` 配置与优先级、上下文压缩、对话恢复、Windows 输出解码、计时边界和主要终止条件。
 
 ## 独立性说明
 

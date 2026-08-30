@@ -6,7 +6,7 @@ EvidenceCoder 是一个 Python 3.11+ 本地 Coding Agent，通过 OpenAI-compati
 核心特色是“完成声明有凭证”：每次工具调用都会生成 OperationRecord；模型必须使用 submit_result，并引用真实成功的操作编号。文件声明必须对应最新写入，检查声明必须对应修改后退出码为 0 的命令，从而降低模型虚构“已经修改、测试已通过”的风险。
 
 安装：python -m pip install -e .
-配置：设置 EVIDENCECODER_MODEL、EVIDENCECODER_BASE_URL、EVIDENCECODER_API_KEY。
+配置：复制 .env.example 为 .env，填写模型、API 地址和 Key；.env 已被 Git 忽略。命令行参数和系统环境变量可覆盖 .env。
 交互运行：evidencecoder --workspace <项目目录>
 一次性运行：evidencecoder --workspace <项目目录> "任务描述"
 恢复对话：evidencecoder --workspace <项目目录> --resume latest

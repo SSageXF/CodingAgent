@@ -10,6 +10,8 @@ import threading
 
 
 def test_cli_over_real_local_http_transport(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     check_command = f'"{sys.executable}" -c "print(123)"'
     replies = [
         _tool_reply("one", "write_text", {"path": "result.py", "content": "print(123)\n"}),
@@ -46,26 +48,29 @@ def test_cli_over_real_local_http_transport(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "EVIDENCECODER_MODEL": "fake",
-                "EVIDENCECODER_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
-                "EVIDENCECODER_API_KEY": "local-test-key",
-            }
+        (tmp_path / ".env").write_text(
+            "EVIDENCECODER_MODEL=fake\n"
+            f"EVIDENCECODER_BASE_URL=http://127.0.0.1:{server.server_port}/v1\n"
+            "EVIDENCECODER_API_KEY=local-test-key\n",
+            encoding="utf-8",
         )
+        environment = os.environ.copy()
+        for name in ("EVIDENCECODER_MODEL", "EVIDENCECODER_BASE_URL", "EVIDENCECODER_API_KEY"):
+            environment.pop(name, None)
+        project_root = str(Path(__file__).parents[1])
+        environment["PYTHONPATH"] = project_root + os.pathsep + environment.get("PYTHONPATH", "")
         result = subprocess.run(
             [
                 sys.executable,
                 "-m",
                 "evidencecoder",
                 "--workspace",
-                str(tmp_path),
+                str(workspace),
                 "--yes",
                 "--no-save-log",
                 "create and verify result.py",
             ],
-            cwd=Path(__file__).parents[1],
+            cwd=tmp_path,
             env=environment,
             capture_output=True,
             text=True,
@@ -81,7 +86,7 @@ def test_cli_over_real_local_http_transport(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Status: completed" in result.stdout
-    assert (tmp_path / "result.py").read_text(encoding="utf-8") == "print(123)\n"
+    assert (workspace / "result.py").read_text(encoding="utf-8") == "print(123)\n"
     assert not replies
 
 
