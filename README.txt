@@ -30,6 +30,6 @@ python -m evidencecoder --workspace $demo
 五、测试与限制
 安装开发依赖：python -m pip install -e ".[dev]"
 运行测试：python -m pytest
-结果为 45 passed、1 skipped；另通过三个真实 API 案例。设计、开源调研和逐库相似性核查见 docs/。
+结果为 47 passed、1 skipped；另通过三个真实 API 案例。设计、开源调研和逐库相似性核查见 docs/。
 
 本地命令不是系统沙箱，可能访问工作区外资源；未知任务勿使用高权限或 --yes。项目不依赖服务端代码执行/Files API，不自动提交或推送 Git。

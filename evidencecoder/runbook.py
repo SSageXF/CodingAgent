@@ -56,6 +56,16 @@ class CycleTranscript:
     followup_messages: list[dict[str, Any]] = field(default_factory=list)
 
     def api_messages(self) -> list[dict[str, Any]]:
+        # Some OpenAI-compatible gateways occasionally return an assistant
+        # message with neither text nor tool calls. Keep that raw response in
+        # the RunBook for auditability, but do not replay an invalid empty
+        # assistant message in the next request. The Engine's control message
+        # remains and asks the model to continue with a valid tool call.
+        content = self.assistant_message.get("content")
+        has_content = isinstance(content, str) and bool(content.strip())
+        has_tool_calls = bool(self.assistant_message.get("tool_calls"))
+        if not has_content and not has_tool_calls:
+            return list(self.followup_messages)
         return [self.assistant_message, *self.followup_messages]
 
 

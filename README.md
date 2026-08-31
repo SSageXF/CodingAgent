@@ -25,7 +25,7 @@ LangChain、LlamaIndex、OpenAI Agents SDK、Claude Agent SDK、AutoGen 或 Crew
 因此，模型负责“决定下一步”，EvidenceCoder 负责“允许什么、实际做什么、记录了什么，
 以及模型能否有证据地宣布完成”。API 服务只负责生成 tool call；文件和命令始终由本机执行。
 
-当前版本为 `0.3.1`。自动测试结果为 45 项通过、1 项因本机符号链接能力跳过；三个真实 API
+当前版本为 `0.3.2`。自动测试结果为 47 项通过、1 项因本机符号链接能力跳过；三个真实 API
 隔离案例已验证创建程序、复现并修复错误、Git 只读审查以及执行凭证闭环。完整结果和已知问题见
 [真实 API 验收报告](docs/08_REAL_API_ACCEPTANCE_REPORT.md)。
 

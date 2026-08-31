@@ -169,6 +169,59 @@ def test_three_plain_text_replies_stall(tmp_path):
     assert "no tool calls" in result.summary
 
 
+def test_empty_assistant_reply_is_not_replayed_to_gateway(tmp_path):
+    gateway = FakeGateway(
+        [
+            ModelReply(""),
+            call("c1", "inspect_tree", {}),
+            call(
+                "c2",
+                "submit_result",
+                {
+                    "summary": "inspected",
+                    "changed_files": [],
+                    "checks": [],
+                    "evidence_ids": ["op-0001"],
+                    "limitations": [],
+                },
+            ),
+        ]
+    )
+
+    result = Engine(settings_for(tmp_path), gateway).run("inspect")
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.runbook.cycles[0].assistant_message == {
+        "role": "assistant",
+        "content": None,
+    }
+    for messages, _tools in gateway.requests[1:]:
+        invalid = [
+            message
+            for message in messages
+            if message.get("role") == "assistant"
+            and not str(message.get("content") or "").strip()
+            and not message.get("tool_calls")
+        ]
+        assert invalid == []
+    assert any(
+        message.get("role") == "user" and "No tool call was supplied" in message["content"]
+        for message in gateway.requests[1][0]
+    )
+
+
+def test_null_content_with_tool_calls_is_replayed(tmp_path):
+    book = RunBook("inspect")
+    book.record_assistant(call("c1", "inspect_tree", {}))
+
+    messages = book.messages_from()
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["content"] is None
+    assert messages[0]["tool_calls"][0]["id"] == "c1"
+
+
 def test_repeated_identical_operations_stall(tmp_path):
     (tmp_path / "x.txt").write_text("x", encoding="utf-8")
     repeated = [
