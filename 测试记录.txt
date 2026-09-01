@@ -1,0 +1,64 @@
+PS C:\!Sage\University\Projects\CodingAgent> $demo = Join-Path $env:TEMP "EvidenceCoderDemo"
+PS C:\!Sage\University\Projects\CodingAgent> New-Item -ItemType Directory -Force $demo
+
+
+    目录: C:\Users\imaohw\AppData\Local\Temp
+
+
+Mode                 LastWriteTime         Length Name                                                                                                        
+----                 -------------         ------ ----                                                                                                        
+d-----         2026/8/28     15:37                EvidenceCoderDemo                                                                                           
+
+
+PS C:\!Sage\University\Projects\CodingAgent> cd C:\!Sage\University\Projects\CodingAgent
+PS C:\!Sage\University\Projects\CodingAgent> .\.venv\Scripts\python.exe -m evidencecoder `
+>>   --workspace $demo `
+>>   "创建 hello.py，让它输出 EvidenceCoder works，然后运行它验证，最后提交结果"
+[EvidenceCoder] cycle 1: asking model
+[EvidenceCoder] op-0001 inspect_tree: ok — [empty directory]
+[EvidenceCoder] cycle 2: asking model
+
+Approval required: write_text (the tool will modify workspace files)
+{
+  "path": "hello.py",
+  "content": "print(\"EvidenceCoder works\")\n",
+  "overwrite": false,
+  "create_parents": false
+}
+Execute this operation? [y/N] y
+[EvidenceCoder] op-0002 write_text: ok — wrote 29 bytes to hello.py
+[EvidenceCoder] cycle 3: asking model
+
+Approval required: run_local (the tool will execute a local shell command)
+{
+  "command": "cat hello.py && echo \"---\" && python3 hello.py"
+}
+Execute this operation? [y/N] y
+[EvidenceCoder] op-0003 run_local: ok — exit code: 1
+'cat'      ڲ    ⲿ   Ҳ   ǿ    еĳ   
+         ļ   
+[EvidenceCoder] cycle 4: asking model
+
+Approval required: run_local (the tool will execute a local shell command)
+{
+  "command": "python3 hello.py"
+}
+Execute this operation? [y/N] y
+[EvidenceCoder] op-0004 run_local: ok — exit code: 9009
+Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+[EvidenceCoder] cycle 5: asking model
+
+Approval required: run_local (the tool will execute a local shell command)
+{
+  "command": "python hello.py"
+}
+Execute this operation? [y/N] y
+[EvidenceCoder] op-0005 run_local: ok — exit code: 0
+EvidenceCoder works
+[EvidenceCoder] cycle 6: asking model
+[EvidenceCoder] op-0006 submit_result: ok — Created hello.py that outputs 'EvidenceCoder works' and verified it runs successfully.
+
+Status: completed
+Created hello.py that outputs 'EvidenceCoder works' and verified it runs successfully.
+Changed files: hello.py
+Run log: C:\Users\imaohw\AppData\Local\Temp\EvidenceCoderDemo\.evidencecoder\runs\5be75b963114.json
